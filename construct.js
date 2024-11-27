@@ -2,8 +2,8 @@ const fs = require("fs");
 const path = require("path");
 
 // Helper function to read .gitignore and extract patterns
-function loadGitignore() {
-  const gitignorePath = path.resolve(".gitignore");
+function loadGitignore(basePath) {
+  const gitignorePath = path.join(basePath, ".gitignore");
   if (!fs.existsSync(gitignorePath)) {
     return [];
   }
@@ -17,13 +17,15 @@ function loadGitignore() {
 }
 
 // Function to check if a file should be excluded
-function shouldExclude(filePath, ignorePatterns, excludedExtensions) {
+function shouldExclude(filePath, basePath, ignorePatterns, excludedExtensions) {
+  const relativeFilePath = path.relative(basePath, filePath);
+
   // Exclude files based on .gitignore patterns
   for (const pattern of ignorePatterns) {
     const regex = new RegExp(
       pattern.replace(/\./g, "\\.").replace(/\*/g, ".*") // Convert simple glob patterns to regex
     );
-    if (regex.test(filePath)) {
+    if (regex.test(relativeFilePath)) {
       return true;
     }
   }
@@ -38,7 +40,7 @@ function shouldExclude(filePath, ignorePatterns, excludedExtensions) {
 }
 
 // Function to combine files into chunks
-async function constructFiles(outputPrefix = "combined", maxSizeMB = 30) {
+async function constructFiles(basePath, outputPrefix = "combined", maxSizeMB = 30) {
   const excludedExtensions = new Set([
     ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".svg", // Images
     ".pdf", // PDFs
@@ -46,9 +48,9 @@ async function constructFiles(outputPrefix = "combined", maxSizeMB = 30) {
     ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", // Videos
   ]);
 
-  const ignorePatterns = loadGitignore();
+  const ignorePatterns = loadGitignore(basePath);
 
-  // Find all files in the current directory recursively
+  // Find all files in the specified directory recursively
   const fileList = [];
   const traverseDirectory = (dir) => {
     const files = fs.readdirSync(dir, { withFileTypes: true });
@@ -61,11 +63,11 @@ async function constructFiles(outputPrefix = "combined", maxSizeMB = 30) {
       }
     });
   };
-  traverseDirectory(".");
+  traverseDirectory(basePath);
 
   // Filter files based on exclusion rules
-  const filteredFiles = fileList.filter((file) =>
-    !shouldExclude(path.relative(".", file), ignorePatterns, excludedExtensions)
+  const filteredFiles = fileList.filter(
+    (file) => !shouldExclude(file, basePath, ignorePatterns, excludedExtensions)
   );
 
   // Combine files into output files
@@ -90,7 +92,7 @@ async function constructFiles(outputPrefix = "combined", maxSizeMB = 30) {
     }
 
     // Write file metadata and content
-    const relativePath = path.relative(".", file);
+    const relativePath = path.relative(basePath, file);
     try {
       const content = fs.readFileSync(file, "utf8");
       outputFile.write(`---FILE START---\n`);
@@ -115,6 +117,10 @@ async function constructFiles(outputPrefix = "combined", maxSizeMB = 30) {
 
 // Run the function if the script is executed directly
 if (require.main === module) {
-  const [outputPrefix, maxSizeMB] = process.argv.slice(2);
-  constructFiles(outputPrefix || "combined", Number(maxSizeMB) || 30);
+  const [basePath, outputPrefix, maxSizeMB] = process.argv.slice(2);
+  if (!basePath) {
+    console.error("Error: Please provide the base directory path as the first argument.");
+    process.exit(1);
+  }
+  constructFiles(path.resolve(basePath), outputPrefix || "combined", Number(maxSizeMB) || 30);
 }
